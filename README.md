@@ -1,94 +1,46 @@
 # svbuild
 
-`svbuild` is a Bun-powered command-line builder for small Svelte
-applications. It discovers frontend dependencies from `packages.txt` files,
-installs missing packages into a temporary build directory, and produces a
-browser-ready JavaScript bundle.
+Bundle a Svelte 5 app (optional Tailwind 4) with one command.
 
-## Requirements
+**Requires [Bun](https://bun.sh)** (uses `Bun.spawn`).
 
-- [Bun](https://bun.sh/) 1.0 or newer
-- A Svelte app containing `App.svelte` or `app.svelte`
+## Usage
 
-## Run from GitHub
+```bash
+# no install (runs straight from GitHub)
+bunx github:USER/svbuild -i ./src -o ./dist -t
 
-This package is distributed directly from GitHub and does not require npm
-publication.
-
-Install it as a development dependency:
-
-```sh
-bun add --dev github:mathakim29/sveltephp#master
+# global install
+bun add -g github:USER/svbuild
+svbuild -i ./src -o ./dist -t
 ```
 
-Run the CLI:
+| Flag | Meaning                        |
+| ---- | ------------------------------ |
+| `-i` | input dir (must have App.svelte) |
+| `-o` | output dir                     |
+| `-t` | enable Tailwind                |
+| `-h` | help                           |
 
-```sh
-bunx svbuild -i ./app -o ./dist
+Output: `bundle.js` (+ `style.css` with `-t`).
+
+## Extra packages
+
+Put a `packages.txt` anywhere in the input dir:
+
+```
+# one per line
+lodash
+dayjs@1.11
+@scope/pkg@2
 ```
 
-For a one-off run without adding a dependency:
+Deps are installed into `/tmp/build` and cached.
 
-```sh
-bunx --package github:mathakim29/sveltephp svbuild \
-  -i ./app \
-  -o ./dist
+## Pin / update / remove
+
+```bash
+bunx github:mathakim29/svbuild#v1.0.0 -h
+bun add -g github:mathakim/svbuild      # update
+bun remove -g svbuild
 ```
-
-Pin a tag, branch, or commit for reproducible builds:
-
-```sh
-bun add --dev github:mathakim29/sveltephp#v0.1.0
-```
-
-## Options
-
-```text
--i, --input   Directory containing App.svelte and packages.txt files
--o, --output  Directory for bundle.js and generated CSS
--t, --tailwind  Generate style.css with Tailwind CSS
--h, --help    Show usage information
-```
-
-Example with Tailwind:
-
-```sh
-bunx svbuild -i ./app -o ./dist -t
-```
-
-## Dependency discovery
-
-`svbuild` always includes Svelte 5. It recursively scans the input directory
-for `packages.txt` files. Each non-empty, non-comment line is treated as a
-package specifier, for example:
-
-```text
-dayjs@1.11.13
-blockly@12.3.1
-```
-
-Dependencies are installed under `/tmp/build/node_modules` and reused across
-runs when available. The output directory receives `bundle.js` and, when
-Tailwind succeeds, `style.css`.
-
-## Local development
-
-Run the CLI directly from this repository:
-
-```sh
-bun run setup.ts -i ./example-app -o ./dist
-```
-
-The executable is declared in `package.json`:
-
-```json
-{
-  "bin": {
-    "svbuild": "./setup.ts"
-  }
-}
-```
-
-## License
-
-No license has been selected yet.

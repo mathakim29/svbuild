@@ -1,23 +1,18 @@
 {
   "name": "svbuild",
-  "version": "0.1.0",
-  "description": "Build Svelte applications from Bun with automatic frontend dependency discovery.",
+  "version": "1.0.0",
+  "description": "Bundle a Svelte 5 app (optional Tailwind 4) with one command",
   "type": "module",
-  "bin": {
-    "svbuild": "./setup.ts"
-  },
-  "files": [
-    "setup.ts",
-    "README.md"
-  ],
-  "engines": {
-    "bun": ">=1.0.0"
-  },
+  "bin": { "svbuild": "./svbuild.ts" },
+  "files": ["svbuild.ts"],
+  "engines": { "bun": ">=1.1" },
+  "license": "MIT",
   "dependencies": {
     "esbuild": "^0.25.0",
-    "esbuild-svelte": "^0.9.0"
+    "esbuild-svelte": "^0.9.0",
+    "svelte": "^5"
   },
-  "publishConfig": {
-    "access": "public"
+  "devDependencies": {
+    "@types/bun": "latest"
   }
 }

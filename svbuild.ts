@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 // svbuild.ts
 import * as esbuild from 'esbuild';
 import sveltePlugin from 'esbuild-svelte';
