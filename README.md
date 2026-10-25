@@ -1,19 +1,19 @@
 # svbuild
 
-Bundle a Svelte 5 app (optional Tailwind 4) with one command.
+Bundle a Svelte 5 app (optionally with Tailwind 4) with one command.
 
-**Requires [Bun](https://bun.sh)** (uses `Bun.spawn`).
+**Requires [Bun](https://bun.sh)** 
 
-## Usage
+### Usage
 
 ```bash
-# no install (runs straight from GitHub)
-bunx github:mathakim29/svbuild -i ./src -o ./dist -t
-
 # global install
 bun add -g github:mathakim29/svbuild
 svbuild -i ./src -o ./dist -t
 ```
+
+The input directory must contain `App.svelte` (or `app.svelte`). The output
+directory is created if it does not exist.
 
 | Flag | Meaning                        |
 | ---- | ------------------------------ |
@@ -22,9 +22,12 @@ svbuild -i ./src -o ./dist -t
 | `-t` | enable Tailwind                |
 | `-h` | help                           |
 
-Output: `bundle.js` (+ `style.css` with `-t`).
+Output: `bundle.js` and, when `-t` is used successfully, `style.css`.
 
-## Extra packages
+Tailwind failures are non-fatal: svbuild still produces `bundle.js` and prints
+a warning if it cannot generate `style.css`.
+
+### Extra packages
 
 Put a `packages.txt` anywhere in the input dir:
 
@@ -35,10 +38,7 @@ dayjs@1.11
 @scope/pkg@2
 ```
 
-Deps are installed into `/tmp/build` and cached.
-
-## Pin / update / remove
-
+### Pin / update / remove
 ```bash
 bunx github:mathakim29/svbuild#v1.0.0 -h
 bun add -g github:mathakim29/svbuild      # update
