@@ -8,10 +8,10 @@ Bundle a Svelte 5 app (optional Tailwind 4) with one command.
 
 ```bash
 # no install (runs straight from GitHub)
-bunx github:USER/svbuild -i ./src -o ./dist -t
+bunx github:mathakim29/svbuild -i ./src -o ./dist -t
 
 # global install
-bun add -g github:USER/svbuild
+bun add -g github:mathakim29/svbuild
 svbuild -i ./src -o ./dist -t
 ```
 
@@ -41,6 +41,6 @@ Deps are installed into `/tmp/build` and cached.
 
 ```bash
 bunx github:mathakim29/svbuild#v1.0.0 -h
-bun add -g github:mathakim/svbuild      # update
+bun add -g github:mathakim29/svbuild      # update
 bun remove -g svbuild
 ```
