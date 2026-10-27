@@ -12,7 +12,7 @@
     "dev:node": "node --import=tsx ./svbuild.ts"
   },
   "files": [
-    "dist/svbuild.js"
+    "dist/svbuild.ts"
   ],
   "engines": {
     "bun": ">=1.1",
