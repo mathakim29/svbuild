@@ -1,10 +1,11 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // svbuild.ts
 import * as esbuild from 'esbuild';
 import sveltePlugin from 'esbuild-svelte';
 import { parseArgs } from 'node:util';
 import { join, resolve } from 'node:path';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 
 const TMP = '/tmp/build';
 const USAGE = `Usage: svbuild -i <dir with App.svelte> -o <output dir> [-t]
@@ -67,18 +68,19 @@ async function packagesFrom(manifest: string): Promise<string[]> {
     .filter(Boolean);
 }
 
-async function run(cmd: string, args: string[], cwd?: string) {
-  try {
-    const p = Bun.spawn([cmd, ...args], { cwd, env, stdout: 'pipe', stderr: 'pipe' });
-    const [out, err] = await Promise.all([
-      new Response(p.stdout).text(),
-      new Response(p.stderr).text(),
-    ]);
-    const exitCode = await p.exited;
-    return { ok: exitCode === 0, out, err };
-  } catch (e) {
-    return { ok: false, out: '', err: (e as Error).message };
-  }
+// Cross-compatible spawn wrapper
+async function run(cmd: string, args: string[], cwd?: string): Promise<{ ok: boolean; out: string; err: string }> {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args, { cwd, env, shell: process.platform === 'win32' });
+    let out = '';
+    let err = '';
+    
+    p.stdout?.on('data', (d) => (out += d.toString()));
+    p.stderr?.on('data', (d) => (err += d.toString()));
+    
+    p.on('error', (e) => resolve({ ok: false, out, err: e.message }));
+    p.on('close', (code) => resolve({ ok: code === 0, out, err }));
+  });
 }
 
 async function retry<T extends { ok: boolean; err: string }>(
@@ -93,6 +95,13 @@ async function retry<T extends { ok: boolean; err: string }>(
   }
   return r;
 }
+
+// ---------- runtime detection ----------
+const isBun = typeof process.versions.bun !== 'undefined';
+const pmCmd = isBun ? 'bun' : 'npm';
+const pmInstallArgs = isBun ? ['install', '--no-progress'] : ['install', '--no-audit', '--no-fund'];
+const pmxCmd = isBun ? 'bun' : 'npx';
+const pmxArgs = isBun ? ['x'] : [];
 
 // ---------- validate input ----------
 if (!(await exists(input))) fail(`Input dir not found: ${input}`);
@@ -129,15 +138,15 @@ for (const d of Object.keys(deps)) {
 }
 
 if (missing.length) {
-  console.log(`📦 Installing: ${missing.join(', ')}`);
+  console.log(`📦 Installing: ${missing.join(', ')} (using ${pmCmd})`);
   await writeFile(
     join(TMP, 'package.json'),
     JSON.stringify({ name: 'svbuild-tmp', private: true, dependencies: deps }),
   );
 
   let r = await retry(
-    () => run('bun', ['install', '--no-progress'], TMP),
-    2, 'bun install',
+    () => run(pmCmd, pmInstallArgs, TMP),
+    2, `${pmCmd} install`,
   );
   if (!r.ok) fail(`Dependency install failed:\n${r.err}`);
 
@@ -154,14 +163,16 @@ if (useTailwind) {
   console.log('🎨 Tailwind');
   const entry = join(TMP, 'tw-input.css');
   await writeFile(entry, `@import "tailwindcss" source("${input}");\n`);
+  
   const r = await retry(
     () => run(
-      'bun',
-      ['x', 'tailwindcss', '-i', entry, '-o', join(out, 'style.css')],
+      pmxCmd,
+      [...pmxArgs, 'tailwindcss', '-i', entry, '-o', join(out, 'style.css')],
       TMP,
     ),
     2, 'tailwind',
   );
+  
   if (r.ok && (await exists(join(out, 'style.css')))) {
     cssOk = true;
   } else {
