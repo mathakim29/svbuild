@@ -3,9 +3,21 @@
   "version": "1.0.0",
   "description": "Bundle a Svelte 5 app (optional Tailwind 4) with one command",
   "type": "module",
-  "bin": { "svbuild": "./svbuild.ts" },
-  "files": ["svbuild.ts"],
-  "engines": { "bun": ">=1.1" },
+  "bin": {
+    "svbuild": "./dist/svbuild.js"
+  },
+  "scripts": {
+    "build": "bun build ./svbuild.ts --target=node --outfile=dist/svbuild.js",
+    "dev:bun": "bun run ./svbuild.ts",
+    "dev:node": "node --import=tsx ./svbuild.ts"
+  },
+  "files": [
+    "dist/svbuild.js"
+  ],
+  "engines": {
+    "bun": ">=1.1",
+    "node": ">=20.0.0"
+  },
   "license": "MIT",
   "dependencies": {
     "esbuild": "^0.25.0",
@@ -13,6 +25,7 @@
     "svelte": "^5"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "tsx": "^4.7.0"
   }
 }
