@@ -1,13 +1,12 @@
 {
   "name": "svbuild",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Bundle a Svelte 5 app (optional Tailwind 4) with one command",
   "type": "module",
   "bin": {
     "svbuild": "./dist/svbuild.js"
   },
   "scripts": {
-    "build": "bun build ./svbuild.ts --target=node --outfile=dist/svbuild.js",
     "dev:bun": "bun run ./svbuild.ts",
     "dev:node": "node --import=tsx ./svbuild.ts"
   },

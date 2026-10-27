@@ -1,26 +1,30 @@
-#!/usr/bin/env node
-// svbuild.ts
+#!/bin/sh
+':' //; command -v bun >/dev/null 2>&1 && exec bun "$0" "$@" || exec node "$0" "$@"
+
+// svbuild (compiled JS, runs on both node >=20 and bun)
+
 import * as esbuild from 'esbuild';
 import sveltePlugin from 'esbuild-svelte';
 import { parseArgs } from 'node:util';
 import { join, resolve } from 'node:path';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
 
-const TMP = '/tmp/build';
+const TMP = join(tmpdir(), 'build');
 const USAGE = `Usage: svbuild -i <dir with App.svelte> -o <output dir> [-t]
   -i  input dir
   -o  output dir
   -t  enable Tailwind
   -h  help`;
 
-const fail = (msg: string, code = 1): never => {
+const fail = (msg, code = 1) => {
   console.error(`✖ ${msg}`);
   process.exit(code);
 };
 
 // ---------- args ----------
-let values: { i?: string; o?: string; t?: boolean; h?: boolean };
+let values;
 try {
   ({ values } = parseArgs({
     options: {
@@ -32,13 +36,14 @@ try {
   }));
 } catch (e) {
   console.error(USAGE);
-  fail((e as Error).message);
+  fail(e.message);
 }
+
 if (values.h) { console.log(USAGE); process.exit(0); }
 if (!values.i || !values.o) { console.error(USAGE); process.exit(1); }
 
-const input = resolve(values.i!);
-const out = resolve(values.o!);
+const input = resolve(values.i);
+const out = resolve(values.o);
 const useTailwind = !!values.t;
 
 // ---------- helpers ----------
@@ -46,12 +51,12 @@ const env = Object.fromEntries(
   Object.entries(process.env).filter(([k]) => k !== 'LD_LIBRARY_PATH'),
 );
 
-async function exists(p: string): Promise<boolean> {
+async function exists(p) {
   try { await stat(p); return true; } catch { return false; }
 }
 
-async function packageManifests(dir: string): Promise<string[]> {
-  const found: string[] = [];
+async function packageManifests(dir) {
+  const found = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     if (entry.name === 'node_modules' || entry.name === '.git') continue;
     const path = join(dir, entry.name);
@@ -61,32 +66,25 @@ async function packageManifests(dir: string): Promise<string[]> {
   return found;
 }
 
-async function packagesFrom(manifest: string): Promise<string[]> {
+async function packagesFrom(manifest) {
   const lines = (await readFile(manifest, 'utf8')).split(/\r?\n/);
-  return lines
-    .map((line) => line.replace(/#.*/, '').trim())
-    .filter(Boolean);
+  return lines.map((line) => line.replace(/#.*/, '').trim()).filter(Boolean);
 }
 
-// Cross-compatible spawn wrapper
-async function run(cmd: string, args: string[], cwd?: string): Promise<{ ok: boolean; out: string; err: string }> {
-  return new Promise((resolve) => {
+function run(cmd, args, cwd) {
+  return new Promise((res) => {
     const p = spawn(cmd, args, { cwd, env, shell: process.platform === 'win32' });
-    let out = '';
+    let o = '';
     let err = '';
-    
-    p.stdout?.on('data', (d) => (out += d.toString()));
+    p.stdout?.on('data', (d) => (o += d.toString()));
     p.stderr?.on('data', (d) => (err += d.toString()));
-    
-    p.on('error', (e) => resolve({ ok: false, out, err: e.message }));
-    p.on('close', (code) => resolve({ ok: code === 0, out, err }));
+    p.on('error', (e) => res({ ok: false, out: o, err: e.message }));
+    p.on('close', (code) => res({ ok: code === 0, out: o, err }));
   });
 }
 
-async function retry<T extends { ok: boolean; err: string }>(
-  fn: () => Promise<T>, tries = 3, label = 'task',
-): Promise<T> {
-  let r!: T;
+async function retry(fn, tries = 3, label = 'task') {
+  let r;
   for (let n = 1; n <= tries; n++) {
     r = await fn();
     if (r.ok) return r;
@@ -105,21 +103,22 @@ const pmxArgs = isBun ? ['x'] : [];
 
 // ---------- validate input ----------
 if (!(await exists(input))) fail(`Input dir not found: ${input}`);
+
 const appFile = (await exists(join(input, 'App.svelte')))
   ? 'App.svelte'
   : (await exists(join(input, 'app.svelte')))
-  ? 'app.svelte'
-  : fail(`No App.svelte in ${input}`);
+    ? 'app.svelte'
+    : fail(`No App.svelte in ${input}`);
 
 try {
   await mkdir(out, { recursive: true });
   await mkdir(TMP, { recursive: true });
 } catch (e) {
-  fail(`Cannot create dirs: ${(e as Error).message}`);
+  fail(`Cannot create dirs: ${e.message}`);
 }
 
 // ---------- deps ----------
-const deps: Record<string, string> = { svelte: '^5' };
+const deps = { svelte: '^5' };
 for (const manifest of await packageManifests(input)) {
   for (const spec of await packagesFrom(manifest)) {
     const match = spec.match(/^(@[^/]+\/[^@]+|[^@]+)(?:@(.+))?$/);
@@ -132,7 +131,7 @@ if (useTailwind) {
   deps['@tailwindcss/cli'] = '^4';
 }
 
-const missing: string[] = [];
+const missing = [];
 for (const d of Object.keys(deps)) {
   if (!(await exists(join(TMP, 'node_modules', d)))) missing.push(d);
 }
@@ -143,13 +142,8 @@ if (missing.length) {
     join(TMP, 'package.json'),
     JSON.stringify({ name: 'svbuild-tmp', private: true, dependencies: deps }),
   );
-
-  let r = await retry(
-    () => run(pmCmd, pmInstallArgs, TMP),
-    2, `${pmCmd} install`,
-  );
+  const r = await retry(() => run(pmCmd, pmInstallArgs, TMP), 2, `${pmCmd} install`);
   if (!r.ok) fail(`Dependency install failed:\n${r.err}`);
-
   for (const d of Object.keys(deps)) {
     if (!(await exists(join(TMP, 'node_modules', d)))) {
       fail(`Dependency missing after install: ${d}`);
@@ -163,7 +157,6 @@ if (useTailwind) {
   console.log('🎨 Tailwind');
   const entry = join(TMP, 'tw-input.css');
   await writeFile(entry, `@import "tailwindcss" source("${input}");\n`);
-  
   const r = await retry(
     () => run(
       pmxCmd,
@@ -172,7 +165,6 @@ if (useTailwind) {
     ),
     2, 'tailwind',
   );
-  
   if (r.ok && (await exists(join(out, 'style.css')))) {
     cssOk = true;
   } else {
@@ -202,12 +194,11 @@ try {
   });
   if (result.errors.length) throw new Error('esbuild reported errors');
 } catch (e) {
-  console.error(`✖ Bundle failed: ${(e as Error).message}`);
+  console.error(`✖ Bundle failed: ${e.message}`);
   exitCode = 1;
 } finally {
   await esbuild.stop();
 }
 
 if (exitCode) process.exit(exitCode);
-
 console.log(`✨ Done → ${out}${useTailwind && !cssOk ? ' (without Tailwind)' : ''}`);
