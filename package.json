@@ -1,0 +1,19 @@
+{
+  "name":"svbuild",
+  "version": "0.0.1",
+  "bin": {
+    "svbuild": "bin/cli.ts"
+  },
+  "scripts": {
+    "dev": "bun bin/cli.ts dev",
+    "build": "bun bin/cli.ts build",
+    "start": "bun bin/cli.ts start"
+  },
+  "dependencies": {
+    "bun-plugin-svelte": "^0.0.6",
+    "commander": "^15.1.0",
+    "picocolors": "^1.1.1",
+    "svelte": "^5.57.3",
+    "tailwind": "^4.0.0"
+  }
+}
