@@ -1,83 +1,77 @@
 #!/usr/bin/env bun
-import { compile } from "svelte/compiler";
-import { watch } from "node:fs";
+import { watch, existsSync, mkdirSync } from "node:fs";
 import { rm, mkdir } from "node:fs/promises";
-import {
-  resolve,
-  join,
-  normalize,
-  sep,
-  dirname,
-  basename,
-  extname,
-} from "node:path";
+import { homedir } from "node:os";
+import { resolve, join, normalize, sep, dirname, basename, extname } from "node:path";
 import { Command } from "commander";
 import pc from "picocolors";
-
-// ---------- CLI Setup (Commander) ----------
-
-const program = new Command();
-
-program
-  .name("svelte-serve")
-  .description("Lightweight Svelte 5 dev server & bundler powered by Bun")
-  .version("1.0.0");
-
-program
-  .command("dev", { isDefault: true })
-  .description("Compile in-memory, serve, watch and live-reload")
-  .option("-p, --port <number>", "Port number", "3000")
-  .option("-H, --host <host>", "Host address", "localhost")
-  .option("-e, --entry <file>", "Root component entry file", "src/App.svelte")
-  .option("-o, --out <dir>", "Output directory for production", "dist")
-  .option("-t, --title <text>", "HTML page title", "Svelte App")
-  .action((opts) => runCmd("dev", opts));
-
-program
-  .command("build")
-  .description("Production build into output directory")
-  .option("-e, --entry <file>", "Root component entry file", "src/App.svelte")
-  .option("-o, --out <dir>", "Output directory", "dist")
-  .option("-t, --title <text>", "HTML page title", "Svelte App")
-  .action((opts) => runCmd("build", opts));
-
-program
-  .command("start")
-  .description("Serve an existing build from output directory")
-  .option("-p, --port <number>", "Port number", "3000")
-  .option("-H, --host <host>", "Host address", "0.0.0.0")
-  .option("-o, --out <dir>", "Output directory", "dist")
-  .action((opts) => runCmd("start", opts));
-
-program.parse(process.argv);
 
 // ---------- Logging (Uvicorn Style) ----------
 
 const log = {
-  info: (msg: string) =>
-    console.log(`${pc.bold(pc.green("INFO"))}:     ${msg}`),
-  warn: (msg: string) =>
-    console.log(`${pc.bold(pc.yellow("WARN"))}:     ${msg}`),
-  error: (msg: string) =>
-    console.error(`${pc.bold(pc.red("ERROR"))}:    ${msg}`),
+  info: (msg: string) => console.log(`${pc.bold(pc.green("INFO"))}:     ${msg}`),
+  warn: (msg: string) => console.log(`${pc.bold(pc.yellow("WARN"))}:     ${msg}`),
+  error: (msg: string) => console.error(`${pc.bold(pc.red("ERROR"))}:    ${msg}`),
 };
 
-// ---------- App State & In-Memory Store ----------
+// ---------- Isolated Global Cache ----------
 
-const devStore = new Map<
-  string,
-  { contents: Uint8Array | string; type: string }
->();
+const CACHE_DIR = join(homedir(), ".svbuild-cache");
+const NODE_MODULES_DIR = join(CACHE_DIR, "node_modules");
+
+async function ensureGlobalDependencies() {
+  if (existsSync(join(NODE_MODULES_DIR, "svelte"))) return;
+
+  log.info("First run setup: installing Svelte 5 into isolated global cache...");
+  mkdirSync(CACHE_DIR, { recursive: true });
+
+  const proc = Bun.spawn(["bun", "add", "svelte@^5.0.0"], {
+    cwd: CACHE_DIR,
+    stdout: "ignore",
+    stderr: "inherit",
+  });
+
+  if ((await proc.exited) !== 0) {
+    log.error("Failed to initialize Svelte compiler cache.");
+    process.exit(1);
+  }
+  log.info("Svelte 5 global cache initialized!");
+}
+
+await ensureGlobalDependencies();
+
+const { compile } = await import(join(NODE_MODULES_DIR, "svelte", "compiler", "index.js"));
+
+// ---------- App State ----------
+
+const devStore = new Map<string, { contents: Uint8Array | string; type: string }>();
 
 // ---------- Svelte Plugin ----------
+
+// Svelte's default export condition resolves to the server build
+// (where mount() throws), so map the main entries to client builds.
+const BROWSER_MAP: Record<string, string> = {
+  svelte: "src/index-client.js",
+  "svelte/store": "src/store/index-client.js",
+};
 
 const sveltePlugin = (prod: boolean, entryPath: string): Bun.BunPlugin => ({
   name: "svelte",
   setup(b) {
+    b.onResolve({ filter: /^svelte(\/.*)?$/ }, ({ path }) => {
+      const mapped = BROWSER_MAP[path];
+      return {
+        path: mapped
+          ? join(NODE_MODULES_DIR, "svelte", mapped)
+          : Bun.resolveSync(path, CACHE_DIR),
+      };
+    });
+
     b.onResolve({ filter: /^virtual:entry$/ }, () => ({
       path: "virtual:entry",
       namespace: "virtual",
     }));
+
     b.onLoad({ filter: /.*/, namespace: "virtual" }, () => ({
       contents: `
         import { mount } from "svelte";
@@ -86,6 +80,7 @@ const sveltePlugin = (prod: boolean, entryPath: string): Bun.BunPlugin => ({
       `,
       loader: "js",
     }));
+
     b.onLoad({ filter: /\.svelte$/ }, async ({ path }) => {
       const src = await Bun.file(path).text();
       const { js, warnings } = compile(src, {
@@ -119,11 +114,7 @@ const page = (title: string, js: string, reload: boolean) => `<!doctype html>
 
 // ---------- Build Logic ----------
 
-async function buildProd(
-  entry: string,
-  outDir: string,
-  title: string,
-): Promise<boolean> {
+async function buildProd(entry: string, outDir: string, title: string): Promise<boolean> {
   if (!(await Bun.file(entry).exists())) {
     log.error(`Entry file not found: ${entry}`);
     return false;
@@ -153,10 +144,7 @@ async function buildProd(
   return true;
 }
 
-async function buildDevInMemory(
-  entry: string,
-  title: string,
-): Promise<boolean> {
+async function buildDevInMemory(entry: string, title: string): Promise<boolean> {
   if (!(await Bun.file(entry).exists())) {
     log.error(`Entry file not found: ${entry}`);
     return false;
@@ -193,7 +181,7 @@ async function buildDevInMemory(
   return true;
 }
 
-// ---------- Server Execution ----------
+// ---------- Server ----------
 
 const SECURITY = {
   "x-content-type-options": "nosniff",
@@ -213,7 +201,7 @@ function serve(
   const pid = process.pid;
   const gzCache = new Map<string, Uint8Array>();
 
-  log.info(`Started server process [${pc.cyan(pid)}]`);
+  log.info(`Started server process [${pc.cyan(String(pid))}]`);
   log.info("Waiting for application startup.");
 
   const server = Bun.serve({
@@ -264,7 +252,7 @@ function serve(
         });
       }
 
-      // Prod/Start mode: serve from disk
+      // Prod/start mode: serve from disk
       const full = join(outDir, rel);
       if (full !== outDir && !full.startsWith(outDir + sep))
         return new Response("Forbidden", { status: 403, headers: SECURITY });
@@ -282,9 +270,7 @@ function serve(
       const headers: Record<string, string> = {
         ...SECURITY,
         "content-type": file.type,
-        "cache-control": hashed
-          ? "public, max-age=31536000, immutable"
-          : "no-cache",
+        "cache-control": hashed ? "public, max-age=31536000, immutable" : "no-cache",
       };
 
       if (
@@ -297,11 +283,7 @@ function serve(
           gzCache.set(servedPath, buf);
         }
         return new Response(buf, {
-          headers: {
-            ...headers,
-            "content-encoding": "gzip",
-            vary: "accept-encoding",
-          },
+          headers: { ...headers, "content-encoding": "gzip", vary: "accept-encoding" },
         });
       }
       return new Response(file, { headers });
@@ -314,10 +296,7 @@ function serve(
 
     error(err) {
       log.error((err as Error).message);
-      return new Response("Internal Server Error", {
-        status: 500,
-        headers: SECURITY,
-      });
+      return new Response("Internal Server Error", { status: 500, headers: SECURITY });
     },
   });
 
@@ -355,6 +334,7 @@ function serve(
       timer = setTimeout(rebuild, 50);
     });
   }
+
   let closing = false;
   const shutdown = () => {
     if (closing) process.exit(1);
@@ -362,9 +342,9 @@ function serve(
     console.log("");
     log.info("Shutting down");
     log.info("Waiting for application shutdown.");
-    server.stop(true); // true = close active connections immediately
+    server.stop(true);
     log.info("Application shutdown complete.");
-    log.info(`Finished server process [${pc.cyan(pid)}]`);
+    log.info(`Finished server process [${pc.cyan(String(pid))}]`);
     process.exit(0);
   };
 
@@ -372,12 +352,12 @@ function serve(
   process.on("SIGTERM", shutdown);
 }
 
-// ---------- Command Action Dispatcher ----------
+// ---------- Command Dispatcher ----------
 
 async function runCmd(cmd: "dev" | "build" | "start", opts: any) {
   const port = Number(opts.port ?? process.env.PORT ?? 3000);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    log.error(`Invalid port: ${opts.port}`);
+    log.error(`Invalid port: ${opts.port ?? process.env.PORT}`);
     process.exit(1);
   }
 
@@ -398,15 +378,52 @@ async function runCmd(cmd: "dev" | "build" | "start", opts: any) {
 
   if (cmd === "start") {
     if (!(await Bun.file(join(outDir, "index.html")).exists())) {
-      log.error(`No build found in ${outDir}. Run: svelte-serve build`);
+      log.error(`No build found in ${outDir}. Run: svbuild build`);
       process.exit(1);
     }
     serve(false, port, host, entry, outDir, title);
     return;
   }
 
-  // Dev command
+  // dev
   const ok = await buildDevInMemory(entry, title);
   if (!ok) process.exit(1);
   serve(true, port, host, entry, outDir, title);
 }
+
+// ---------- CLI Setup ----------
+// No defaults on --port/--host so PORT/HOST env vars work (defaults live in runCmd).
+
+const program = new Command();
+
+program
+  .name("svbuild")
+  .description("Lightweight Svelte 5 dev server & bundler")
+  .version("1.0.0");
+
+program
+  .command("dev", { isDefault: true })
+  .description("Compile in-memory, serve, watch and live-reload")
+  .option("-p, --port <number>", "Port number (default: 3000)")
+  .option("-H, --host <host>", "Host address (default: localhost)")
+  .option("-e, --entry <file>", "Root component entry file", "src/App.svelte")
+  .option("-t, --title <text>", "HTML page title", "Svelte App")
+  .action((opts) => runCmd("dev", opts));
+
+program
+  .command("build")
+  .description("Production build into output directory")
+  .option("-e, --entry <file>", "Root component entry file", "src/App.svelte")
+  .option("-o, --out <dir>", "Output directory", "dist")
+  .option("-t, --title <text>", "HTML page title", "Svelte App")
+  .action((opts) => runCmd("build", opts));
+
+program
+  .command("start")
+  .description("Serve an existing build from output directory")
+  .option("-p, --port <number>", "Port number (default: 3000)")
+  .option("-H, --host <host>", "Host address (default: 0.0.0.0)")
+  .option("-o, --out <dir>", "Output directory", "dist")
+  .action((opts) => runCmd("start", opts));
+
+await program.parseAsync(process.argv);
